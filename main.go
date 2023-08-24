@@ -1,64 +1,85 @@
 package main
 
 import (
-	"fmt"
-	"log"
+	// "log"
+	"encoding/json"
+	"io/ioutil"
 	"net/http"
-	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
+	"github.com/rs/xid"
 )
 
-type Product struct {
-	gorm.Model
-	Code string
-	Price uint
+type Recipe struct {
+	Id           string    `json:"id"`
+	Name         string    `json:"name"`
+	Tags         []string  `json:"tags"`
+	Ingredients  []string  `json:"ingredients"`
+	Instructions []string  `json:"instructions"`
+	PublishedAt  time.Time `json:"publishedAt"`
+}
+
+var recipes []Recipe
+
+func init() {
+	recipes = make([]Recipe, 0)
+	file, _ := ioutil.ReadFile("recipes.json")
+	_ = json.Unmarshal([]byte(file), &recipes)
+}
+
+func NewRecipeHandler(c *gin.Context) {
+	var recipe Recipe
+	if err := c.ShouldBindJSON(&recipe); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+	}
+
+	recipe.Id = xid.New().String()
+	recipe.PublishedAt = time.Now()
+	recipes = append(recipes, recipe)
+	c.JSON(http.StatusOK, recipe)
+}
+
+func ListRecipesHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, recipes)
+}
+
+func UpdateRecipeHandler(c *gin.Context) {
+	id := c.Param("id")
+	var recipe Recipe
+
+	if err := c.ShouldBindJSON(&recipe); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+	}
+
+	index := -1
+
+	for i := 0; i < len(recipes); i++ {
+		if recipes[i].Id == id {
+			index = i
+		}
+	}
+
+	if index == -1 {
+		c.JSON(http.StatusNotFound, gin.H{
+			"Error": "Recipe not found",
+		})
+	}
+
+	recipes[index] = recipe
+	c.JSON(http.StatusOK, recipe)
 }
 
 func main() {
-	r := gin.Default()
-	fmt.Println("Okay")
+	router := gin.Default()
 
-	db, err := gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
-	if err != nil {
-		log.Fatalln("Failed to connect to database")
-	}
+	router.POST("/recipes", NewRecipeHandler)
+	router.GET("/recipes", ListRecipesHandler)
+	router.PUT("/recipes/:id", UpdateRecipeHandler)
 
-	// Migrate the schema
-	db.AutoMigrate(&Product{})
-
-	// Create
-	db.Create(&Product{Code: "D42", Price: 100})
-	// Now we can combine gorm and gin
-
-	r.GET("/products/:id", func(c *gin.Context) {
-		productIdStr := c.Param("id")
-
-		productId, err := strconv.Atoi(productIdStr)
-
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"Error": "Invalid Product ID"})
-		}
-
-		// Read
-		var product Product
-		db.First(&product, productId) // find with integer primary key
-
-		c.JSON(http.StatusOK, product)
-	})
-
-	// Update
-
-	r.GET("/hello-world", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"message": "Hello world!",
-		})
-	})
-
-	err = r.Run() // running on port :8080
-	if err != nil {
-		log.Fatalf("Error running server: %s", err.Error())
-	}
+	router.Run()
 }
